@@ -3,32 +3,55 @@
 .equ DDRB,  0x6002
 .equ DDRA,  0x6003
 
+; cold boot 
+.equ COLDBOOTADDR, 0x0200
+.equ COLDBOOT1, 0x65
+.equ COLDBOOT2, 0x02
+
 ; display
 .equ RS, 0b00100000
 .equ RW, 0b01000000 ; low on write
 .equ E,  0b10000000
 
 
-.org 0x8000
 
+.org 0x8000
+	
+init:
 	; setup the VIA chip
 	LDA #0xff
 	STA DDRA
 	STA DDRB
 	
-	
-init:
-	
-	; start sending commands to the display
-	
-	LDA #0
+	; check for cold boot (0x0200 should have 0x65, 0x02)
+	LDA COLDBOOTADDR
+	CMP #COLDBOOT1
+	BEQ warmboot
+
+coldboot:
+	; turn on a random LED to signify we're doing coldboot
+	LDA #0x01
 	STA PORTA
+
+	; set memory so that future resets will be warmboots
+	LDA #COLDBOOT1
+	STA COLDBOOTADDR
+	;LDA #COLDBOOT2
+	;STA COLDBOOTADDR+1
 	
+	; prompt the LCD to know we need to be in 4-bit mode.
 	; function set
-	
 	LDA #0b00101000 ; 4 bit mode, 2 lines of text, 8x5 chars
 	JSR f_SendLcdInstruction
+
+	; turn off the LED, coldboot over
+	LDA 0x00
+	STA PORTA
 	
+	; now we fall into warmboot.
+warmboot:
+	
+	; function set
 	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
 	JSR f_SendLcdInstruction
 	LDA #0b10000000 ; 4 bit mode, 2 lines of text, 8x5 chars
