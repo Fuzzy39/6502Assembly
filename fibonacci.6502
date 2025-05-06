@@ -1,0 +1,31 @@
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+.org 0x8000
+	; setup the VIA chip
+	LDA #0xff
+	STA DDRB
+	
+init:
+	; so, A and port B are where we store the 2nd to last and last # in the seq. respectively.
+	; Initialize A and portB
+	LDA #0x01
+	STA PORTB
+	CLC
+	
+loop:
+	ADC PORTB 	; A stores the next number in the seq.
+	BCS init
+	TAX			; put it in X temporarily
+	LDA PORTB	; get the last # in A
+	STX PORTB   ; update B with the new value 
+	JMP loop
+	
+	
+
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, 0x00, 0x00

@@ -1,0 +1,24 @@
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+.org 0x8000
+	; setup the VIA chip
+	LDA #0xff
+	STA DDRB
+	
+	; setup for loop
+	LDA #0
+	SEC
+	
+loop:
+	; update output
+	STA PORTB
+	ROL
+	
+	JMP loop
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, 0x00, 0x00

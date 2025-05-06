@@ -1,0 +1,96 @@
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+; display
+.equ RS, 0b00100000
+.equ RW, 0b01000000 ; low on write
+.equ E,  0b10000000
+
+
+.org 0x8000
+
+	; setup the VIA chip
+	LDA #0xff
+	STA DDRA
+	STA DDRB
+	
+	
+init:
+	
+	; start sending commands to the display
+	
+	; function set
+	LDA #0
+	STA PORTA
+	LDA #0b00111000 ; 8 bit mode, 2 lines of text, 8x5 chars
+	STA PORTB
+	LDA #E
+	STA PORTA
+	
+	; Display on/off Control
+	LDA #0
+	STA PORTA
+	LDA #0b00001111 ; Display on, cursor on, blink on
+	STA PORTB
+	LDA #E
+	STA PORTA
+	
+	; Entry mode set
+	LDA #0
+	STA PORTA
+	LDA #0b00000110 ; Increment for next char, do not scroll.
+	STA PORTB
+	LDA #E
+	STA PORTA
+	
+	; Clear Display
+	LDA #0
+	STA PORTA
+	LDA #0b00000001 ; 
+	STA PORTB
+	LDA #E
+	STA PORTA
+	
+	; Return home
+	LDA #0
+	STA PORTA
+	LDA #0b00000010 ; 
+	STA PORTB
+	LDA #E
+	STA PORTA
+	
+	; Start sending data
+	
+	LDA #RS
+	STA PORTA
+	LDA #'H'
+	STA PORTB
+	LDA #RS | E
+	STA PORTA
+	
+	LDA #RS
+	STA PORTA
+	LDA #'i'
+	STA PORTB
+	LDA #RS | E
+	STA PORTA
+	
+	LDA #RS
+	STA PORTA
+	LDA #'!'
+	STA PORTB
+	LDA #RS | E
+	STA PORTA
+	
+	LDA #RS
+	STA PORTA
+	
+end:
+	BRA end
+  
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, 0x00, 0x00
