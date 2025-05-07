@@ -6,17 +6,21 @@
 ; cold boot 
 .equ COLDBOOTADDR, 0x0200
 .equ COLDBOOT1, 0x65
-.equ COLDBOOT2, 0x02
+.equ RESETS, 0x201
 
 ; display
 .equ RS, 0b00100000
 .equ RW, 0b01000000 ; low on write
 .equ E,  0b10000000
 
-
+.org 0xFF00
+str_hello:
+.byte "Hello, world!\0"
+str_resets:
+.byte "You Again?\0"
 
 .org 0x8000
-	
+
 init:
 	; setup the VIA chip
 	LDA #0xff
@@ -36,68 +40,14 @@ coldboot:
 	; set memory so that future resets will be warmboots
 	LDA #COLDBOOT1
 	STA COLDBOOTADDR
-	;LDA #COLDBOOT2
-	;STA COLDBOOTADDR+1
+	
+	; set resets 
+	LDA #0xff
+	STA RESETS
 	
 	; prompt the LCD to know we need to be in 4-bit mode.
 	; function set
 	LDA #0b00101000 ; 4 bit mode, 2 lines of text, 8x5 chars
-	JSR f_SendLcdInstruction
-
-	; turn off the LED, coldboot over
-	LDA 0x00
-	STA PORTA
-	
-	; now we fall into warmboot.
-warmboot:
-	
-	; function set
-	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
-	JSR f_SendLcdInstruction
-	LDA #0b10000000 ; 4 bit mode, 2 lines of text, 8x5 chars
-	JSR f_SendLcdInstruction
-	
-	
-	; high order, low order
-	
-	; Display on/off Control
-	LDA #0b00000000 ; Display on, cursor on, blink on
-	JSR f_SendLcdInstruction
-	LDA #0b11110000 ; Display on, cursor on, blink on
-	JSR f_SendLcdInstruction
-	
-	; Entry mode set
-	LDA #0b00000000 ; Increment for next char, do not scroll.
-	JSR f_SendLcdInstruction
-	LDA #0b01100000 ; Increment for next char, do not scroll.
-	JSR f_SendLcdInstruction
-	
-	; Clear Display
-	LDA #0b00000000 ; 
-	JSR f_SendLcdInstruction
-	LDA #0b00010000 ; 
-	JSR f_SendLcdInstruction
-	
-	; Return home
-	LDA #0b00000000 ; 
-	JSR f_SendLcdInstruction
-	LDA #0b00100000 ; 
-	JSR f_SendLcdInstruction
-	
-	; Start sending data
-
-	LDA #0b00100000
-	JSR f_SendLcdChar
-	LDA #0b00010000
-	JSR f_SendLcdChar
-	
-	
-end:
-	BRA end
-	
-	
-f_SendLcdInstruction: 
-	; A - the instruction to send
 	STA PORTB
 	LDA #0
 	STA PORTA
@@ -105,20 +55,157 @@ f_SendLcdInstruction:
 	STA PORTA
 	LDA #0
 	STA PORTA
+
+	; turn off the LED, coldboot over
+	LDA #0x00
+	STA PORTA
+	
+	; now we fall into warmboot.
+warmboot:
+	; increment reset counter
+	INC RESETS
+	
+	
+	; function set
+	LDA #0b00101000 ; 4 bit mode, 2 lines of text, 8x5 chars
+	JSR f_SendLcdInstruction
+	
+	; Display on/off Control
+	LDA #0b00001111 ; Display on, cursor on, blink on
+	JSR f_SendLcdInstruction
+	
+	; Entry mode set
+	LDA #0b00000110 ; Increment for next char, do not scroll.
+	JSR f_SendLcdInstruction
+	
+	; Clear Display
+	LDA #0b00000001 ; 
+	JSR f_SendLcdInstruction
+	
+	; Return home
+	LDA #0b00000010 ; 
+	JSR f_SendLcdInstruction
+	
+	; Start sending data
+
+	LDA #0x00
+	CMP RESETS
+	BNE warm_message
+	
+	LDA #<str_hello
+	STA 0x00
+	LDA #>str_hello
+	STA 0x01
+	JSR f_PrintString
+	BRA end
+	
+warm_message:
+	LDA #<str_resets
+	STA 0x00
+	LDA #>str_resets
+	STA 0x01
+	JSR f_PrintString
+	BRA end
+	
+	
+end:
+	BRA end
+
+
+
+
+	
+f_PrintString:
+	; 0000, 0001 - address of string
+	; string must fit within page.
+	LDY #0
+printString_loop:
+	; stash Y on the stack
+	TYA
+	PHA
+	
+	LDA (0x00), Y ; load a pointer in the zero page plus Y.
+	BEQ printString_end
+	JSR f_SendLcdChar
+	
+	; take Y off the stack and increment
+	PLA
+	TAY
+	INY
+	BRA printString_loop
+
+printString_end:
+	PLA ; clean up the stack
+	RTS
+	
+
+
+f_SendLcdInstruction: 
+	; A - the instruction to send
+	; destroys All
+	TAX
+	; get the high nybble (to send first)
+	AND #0xF0
+	; send
+	STA PORTB
+	LDA #0
+	STA PORTA
+	LDA #E
+	STA PORTA
+	LDA #0
+	STA PORTA
+		
+	; get the low nybble
+	TXA
+	AND #0x0F
+	; bitshift << 4
+	ASL A
+	ASL A
+	ASL A
+	ASL A
+	
+	; send
+	STA PORTB
+	LDA #E
+	STA PORTA
+	LDA #0
+	STA PORTA
+	
 	RTS
 
 	
 f_SendLcdChar: 
-	; A - the char to send
+	; A - the instruction to send
+	; destroys All
+	TAX
+	; get the high nybble (to send first)
+	AND #0xF0
+	; send
 	STA PORTB
 	LDA #RS
 	STA PORTA
-	LDA #RS | E
+	LDA #RS|E
 	STA PORTA
 	LDA #RS
 	STA PORTA
+		
+	; get the low nybble
+	TXA
+	AND #0x0F
+	; bitshift << 4
+	ASL A
+	ASL A
+	ASL A
+	ASL A
+	
+	; send
+	STA PORTB
+	LDA #RS|E
+	STA PORTA
+	LDA #RS
+	STA PORTA
+	
 	RTS
-
 
 .org 0xfffc
 	; reset vector
