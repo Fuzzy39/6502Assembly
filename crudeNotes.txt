@@ -16,10 +16,9 @@
 .equ E,  0b00001000
 
 .org 0xFF00
-str_hello:
-.byte "Hello, world!\0"
-str_resets:
-.byte "You Again?\0"
+; Notes in an octave, from C5 to C6
+
+.byte 0xE8, 0xE0, 0xDC, 0xD4, 0xC8, 0xC0, 0xB8, 0xAC, 0xA0, 0x98, 0x8C, 0x7C
 
 .org 0x8000
 
@@ -35,10 +34,6 @@ init:
 	BEQ warmboot
 
 coldboot:
-	; turn on a random LED to signify we're doing coldboot
-	LDA #0x01
-	STA PORTA
-
 	; set memory so that future resets will be warmboots
 	LDA #COLDBOOT1
 	STA COLDBOOTADDR
@@ -49,18 +44,12 @@ coldboot:
 	
 	; prompt the LCD to know we need to be in 4-bit mode.
 	; function set
-	LDA #0b00101000 ; 4 bit mode, 2 lines of text, 8x5 chars
+	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
 	STA PORTB
-	LDA #0
-	STA PORTA
-	LDA #E
-	STA PORTA
-	LDA #0
-	STA PORTA
-
-	; turn off the LED, coldboot over
-	LDA #0x00
-	STA PORTA
+	LDA #0b00101000 
+	STA PORTB
+	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
+	STA PORTB
 	
 	; now we fall into warmboot.
 warmboot:
@@ -73,7 +62,7 @@ warmboot:
 	JSR f_SendLcdInstruction
 	
 	; Display on/off Control
-	LDA #0b00001111 ; Display on, cursor on, blink on
+	LDA #0b00001110 ; Display on, cursor on, blink on
 	JSR f_SendLcdInstruction
 	
 	; Entry mode set
@@ -90,30 +79,89 @@ warmboot:
 	
 	; Start sending data
 
+main:
 	LDA #0x00
-	CMP RESETS
-	BNE warm_message
 	
-	LDA #<str_hello
-	STA 0x00
-	LDA #>str_hello
-	STA 0x01
-	JSR f_PrintString
-	BRA end
+loop:	
+	PHA
+	JSR f_playNote
+	LDA #0x00
 	
-warm_message:
-	LDA #<str_resets
-	STA 0x00
-	LDA #>str_resets
-	STA 0x01
-	JSR f_PrintString
-	BRA end
-	
+inner_loop:
+	ADC #0x01
+	BCC inner_loop
+
+	PLA
+	ADC #0x01
+	CMP #0x0C
+	BNE continue
+	LDA #0x00
+continue:
+	BRA loop
 	
 end:
 	BRA end
 
+f_playNote:
+	; A - note
+	CMP #0xC
+	BCC playNote_good
+	LDA 0x00
+playNote_good:
+	TAX
+	LDA 0x00FF, X
+	PHA
+	JSR f_printByte
+	; return home
+	LDA #0b00000010 ; 
+	JSR f_SendLcdInstruction
+	PLA
+	STA PORTA
+	
+	RTS
 
+f_printByte:
+	; prints a byte in hex on the display
+	; A - byte
+	; clobbers registers, TEMP 0-3
+	
+	TAY
+	; get high nybble first
+	AND #0b11110000
+	LSR A
+	LSR A
+	LSR A
+	LSR A
+	JSR f_NybbleToChar
+	STA TEMP + 1
+	; low nybble
+	TYA
+	AND #0b00001111
+	JSR f_NybbleToChar
+	STA TEMP + 2
+	
+	; add a '\0' to the string
+	LDA #0x00
+	STA TEMP + 3
+	LDA #<(TEMP+1)
+	STA 0x00
+	LDA #>(TEMP+1)
+	STA 0x01
+	JSR f_PrintString
+	RTS
+	
+	
+
+f_NybbleToChar:
+	; converts the value in A (0-15) to it's corresponding Hexidecimal digit
+	CMP #0xA
+	BCS NybbleToChar_letter
+	; number
+	ADC #0x30
+	RTS
+NybbleToChar_letter:
+	ADC #0x36
+	RTS
 
 	
 f_PrintString:
