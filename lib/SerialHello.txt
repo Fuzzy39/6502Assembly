@@ -1,0 +1,276 @@
+
+; Via chip
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+.equ T1CLOW, 0x6004
+.equ T1CHIGH, 0x6005
+.equ T1LOW, 0x6006
+.equ T1HIGH, 0x6007
+
+.equ T2CLOW, 0x6008
+.equ T2CHIGH, 0x6009
+
+.equ SHIFTREG, 0x600A
+.equ AUX_CONTROL, 0x600B
+.equ PERIPHREAL_CONTROL, 0x600C
+.equ INT_FLAG, 0x600D
+.equ INT_ENABLE, 0x600E
+
+
+; cold boot 
+.equ COLDBOOTADDR, 0x0200
+.equ COLDBOOT1, 0x65
+.equ RESETS, 0x201
+.equ TEMP, 0x0210 ; 16 bytes of temporary 'registers'
+.equ TIMER, 0x0220
+
+; serial
+.equ SENDING, 0x221 ; boolean
+.equ SENDING_DATA, 0x222
+
+; tiemr interval: 104us. (~9600 baud) 
+;  6.667 ms (~150 baud)
+;  20ms (50 baud)
+.equ TIMER_INTERVAL, 104
+
+
+; display
+.equ RS, 0b00000010
+.equ RW, 0b00000100 ; low on write
+.equ E,  0b00001000
+
+
+; port A stuff
+.equ SHIFT, 0b10000000
+.equ TX,    0b01000000
+.equ RX,    0b00100000
+
+
+
+
+; notes
+.equ SOUND_ENABLE, 0b00000001 
+
+.org 0xFF00
+.byte "Hello, world!\0"
+
+
+
+; below is not true not true
+; note format: 2 bytes per note.
+; duration is measued in 
+; 50ms intervals. (50ms - 800ms)
+
+
+.org 0x8000
+
+.include init.txt
+
+main:
+	SEI
+
+	; change the direction of output...
+	LDA #0b11111011 ; for the serial input
+	STA DDRA
+
+
+	; setup timer interrupt
+	
+	
+	LDA #0b11000100 ; enable T1 interrupt and shift register interrupt.
+	STA INT_ENABLE	
+	
+	LDA #0b01011000 ; enable continuous interrupts on T1.
+					; enable the shift register to shift out on phi2 (system clock)
+	STA AUX_CONTROL
+	
+		
+	; set the timer interval.
+	LDA #<TIMER_INTERVAL
+	STA T1LOW
+	LDA #>TIMER_INTERVAL
+	STA T1HIGH
+	
+	LDA #<TIMER_INTERVAL
+	STA T1CLOW
+	LDA #>TIMER_INTERVAL
+	STA T1CHIGH
+
+
+	; initialize the timer variable.
+	LDA #0x00
+	STA TIMER
+	STA SENDING
+	
+		
+	; initialize the TX line to high.
+	LDA PORTA
+	ORA #TX
+	STA PORTA
+	
+	; shut up the speaker. 	
+	LDA #0x00
+	STA SHIFTREG
+	
+	
+
+	; load the string pointer...
+	LDA #0x00
+	STA 0x00
+	LDA #0xFF
+	STA 0x01
+	
+	; enable interrupts
+	CLI
+	
+	; 0000, 0001 - address of string
+	; string must fit within page.
+	; clobbers A, X, TEMP0
+	LDY #0
+loop:
+	; stash Y on the stack
+	TYA
+	PHA
+	
+wait_loop:
+	LDA SENDING
+	CMP #0x00
+	BNE wait_loop
+	
+	LDA (0x00), Y ; load a pointer in the zero page plus Y.
+	BEQ done
+	JSR f_SendLcdChar
+	
+	; send the character through the serial port.
+	LDA (0x00), Y
+	STA SENDING_DATA
+	STA SENDING ; it's nonzero so it should be fine.
+	
+	
+	; take Y off the stack and increment
+	PLA
+	TAY
+	INY
+	BRA loop
+
+done:
+	PLA ; clean up the stack
+	
+end:
+	BRA end
+
+	
+irqb:
+	; check whether this is a timer interrupt
+	PHA
+	LDA INT_FLAG
+	BIT #0b00000100
+	BNE irqb_shift
+	
+	; we assume this is a timer interrupt.
+	; Read T1C-L low or write T1L-H high to clear the interrupt.
+	LDA T1CLOW
+	
+	; check to see if we're sending. if not, we don't need to bother.
+	LDA SENDING
+	CMP #0x00
+	BEQ irqb_end
+	
+	; increment the timer. check if it's time to stop playing
+	INC TIMER
+	LDA TIMER
+	
+	
+	CMP #1 ; If the timer is 1, we're running the start bit
+	BEQ irqb_send_start 
+	CMP #10
+	BEQ irqb_send_stop 	; stop bit, will also reset timer and such.
+	BRA irqb_send
+	
+irqb_send_start:
+	; the start bit is a 0.
+	LDA PORTA
+	AND #!TX
+	STA PORTA
+	
+	; that's all we should need to do.
+	BRA irqb_end
+	
+	
+irqb_send:
+	; sending requires some thought, though.
+	; not sure which order bits should be sent in. Let's try least significant first.
+	LDA SENDING_DATA
+	AND #0b00000001
+	BEQ irqb_send_0
+	
+	; send a 1.
+	LDA PORTA
+	ORA #TX
+	STA PORTA
+	BRA irqb_send_finish
+	
+irqb_send_0:
+	LDA PORTA
+	AND #!TX
+	STA PORTA
+	
+irqb_send_finish:
+	; shift the data to send.
+	LSR SENDING_DATA
+	BRA irqb_end
+	
+irqb_send_stop:
+	; the stop bit is high.
+	LDA PORTA
+	ORA #TX
+	STA PORTA
+	
+	; we need to set SENDING to false and reset the timer.
+	LDA #0
+	STA SENDING
+	STA TIMER
+	
+	; now we're done!
+	BRA irqb_end
+
+	
+irqb_end:
+	
+
+	PLA	
+	RTI
+	
+	
+	; this is essentially unused in this program but I'll keep it.
+irqb_shift:
+	; we have successfully shifted a byte to the shift register.
+	; we need to pulse the clock on the shift register to update the value, and
+	; clear the interrupt flag before returning.
+	
+	
+	; clear interrupt:
+	LDA #0b00000100 ; writing this to the flag register should clear only the shift interrupt.
+	STA INT_FLAG
+	
+	; pulse the clock.
+	LDA PORTA
+	EOR #0b10000000
+	STA PORTA
+	EOR #0b10000000
+	STA PORTA
+	
+	; get outta here!
+	PLA
+	RTI
+
+
+
+.include lib.txt
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, <irqb, >irqb

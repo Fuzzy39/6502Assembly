@@ -1,0 +1,56 @@
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+; cold boot 
+.equ COLDBOOTADDR, 0x0200
+.equ COLDBOOT1, 0x65
+.equ RESETS, 0x201
+
+.equ TEMP, 0x0210 ; 16 bytes of temporary 'registers'
+
+; display
+.equ RS, 0b00000010
+.equ RW, 0b00000100 ; low on write
+.equ E,  0b00001000
+
+.org 0xFF00
+str_hello:
+.byte "Hello, world!\0"
+str_resets:
+.byte "You Again?\0"
+
+.org 0x8000
+
+.include init.txt
+
+main:
+	LDA #0x00
+	CMP RESETS
+	BNE warm_message
+	
+	LDA #<str_hello
+	STA 0x00
+	LDA #>str_hello
+	STA 0x01
+	JSR f_PrintString
+	BRA end
+	
+warm_message:
+	LDA #<str_resets
+	STA 0x00
+	LDA #>str_resets
+	STA 0x01
+	JSR f_PrintString
+	BRA end
+	
+	
+end:
+	BRA end
+
+.include lib.txt
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, 0x00, 0x00

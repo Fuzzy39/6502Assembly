@@ -1,0 +1,157 @@
+
+; Via chip
+.equ PORTB, 0x6000
+.equ PORTA, 0x6001
+.equ DDRB,  0x6002
+.equ DDRA,  0x6003
+
+.equ T1CLOW, 0x6004
+.equ T1CHIGH, 0x6005
+.equ T1LOW, 0x6006
+.equ T1HIGH, 0x6007
+
+.equ T2CLOW, 0x6008
+.equ T2CHIGH, 0x6009
+
+.equ SHIFTREG, 0x600A
+.equ AUX_CONTROL, 0x600B
+.equ PERIPHREAL_CONTROL, 0x600C
+.equ INT_FLAG, 0x600D
+.equ INT_ENABLE, 0x600E
+
+
+; cold boot 
+.equ COLDBOOTADDR, 0x0200
+.equ COLDBOOT1, 0x65
+.equ RESETS, 0x201
+.equ TEMP, 0x0210 ; 16 bytes of temporary 'registers'
+.equ TIMER, 0x0220
+
+; display
+.equ RS, 0b00000010
+.equ RW, 0b00000100 ; low on write
+.equ E,  0b00001000
+
+; notes
+.equ SOUND_ENABLE, 0b00000001 
+
+.org 0xFF00
+
+
+.org 0x8000
+
+.include init.txt
+
+main:
+	; setup timer interrupt
+	
+	
+	LDA #0b11000100 ; enable T1 interrupt and shift register interrupt.
+	STA INT_ENABLE
+	
+	LDA #0b01011000 ; enable continuous interrupts on T1.
+					; enable the shift register to shift out on phi2 (system clock)
+	STA AUX_CONTROL
+	
+	LDA #<50000 ; set counter to 50k clock cycles, 50ms.
+	STA T1LOW
+	LDA #>50000
+	STA T1HIGH
+	
+	LDA #<50000 ; set counter to 50k clock cycles, 50ms.
+	STA T1CLOW
+	LDA #>50000
+	STA T1CHIGH
+	
+
+	
+	LDA #0x00
+	STA TIMER
+	
+loop:
+	SEI
+	PHA
+	JSR f_printByte
+	LDA #' '
+	JSR f_SendLcdChar
+	LDA TIMER
+	JSR f_printByte
+	; return home
+	LDA #0b00000010 ; 
+	JSR f_SendLcdInstruction
+	PLA
+	
+	PHA
+	; play sound, sometimes
+	AND #0x01
+    ORA #0xE8
+	STA SHIFTREG
+	PLA
+	
+	CLI
+	BRA loop
+	
+end:
+	BRA end
+	
+
+	
+irqb:
+	; check whether this is a timer interrupt
+	PHA
+	LDA INT_FLAG
+	BIT #0b00000100
+	BNE irqb_shift
+	
+	INC TIMER
+	LDA TIMER
+	CMP #0x14
+	BNE irqb_end
+	
+	; 1 second has passed, increment A.
+	PLA
+	CLC
+	ADC #0x01
+	PHA
+	
+	; reset timer.
+	LDA #0x00
+	STA TIMER
+
+	
+	; Read T1C-L low or write T1L-H high to clear the interrupt.
+irqb_end:
+	LDA #0xFF
+	LDA T1CLOW
+	PLA	
+	RTI
+
+
+	
+irqb_shift:
+	; we have successfully shifted a byte to the shift register.
+	; we need to pulse the clock on the shift register to update the value, and
+	; clear the interrupt flag before returning.
+	
+	
+	; clear interrupt:
+	LDA #0b00000100 ; writing this to the flag register should clear only the shift interrupt.
+	STA INT_FLAG
+	
+	; pulse the clock.
+	LDA PORTA
+	EOR #0b10000000
+	STA PORTA
+	EOR #0b10000000
+	STA PORTA
+	
+	; get outta here!
+	PLA
+	RTI
+
+
+.include lib.txt
+
+.org 0xfffc
+	; reset vector
+.byte 0x00, 0x80, <irqb, >irqb

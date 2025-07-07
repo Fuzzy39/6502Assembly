@@ -15,10 +15,18 @@
 .equ RW, 0b00000100 ; low on write
 .equ E,  0b00001000
 
+
+; notes
+.equ SOUND_ENABLE, 0b00000001 
+
 .org 0xFF00
 ; Notes in an octave, from C5 to C6
 
-.byte 0xE8, 0xE0, 0xDC, 0xD4, 0xC8, 0xC0, 0xB8, 0xAC, 0xA0, 0x98, 0x8C, 0x7C
+;.byte 0xE6, 0xE0, 0xDA, 0xD2, 0xC8, 0xC1, 0xB8, 0xAC, 0xA1, 0x97, 0x8A, 0x7A
+
+; whole notes in an octave from C5 to C6 (including C6
+;     C     D     E     F     G     A     B     C
+.byte 0xE7, 0xDB, 0xC9, 0xC1, 0xAD, 0x97, 0x7B, 0x6D
 
 .org 0x8000
 
@@ -46,6 +54,8 @@ coldboot:
 	; function set
 	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
 	STA PORTB
+	
+	JSR f_waitForLcdReady
 	LDA #0b00101000 
 	STA PORTB
 	LDA #0b00100000 ; 4 bit mode, 2 lines of text, 8x5 chars
@@ -82,34 +92,54 @@ warmboot:
 main:
 	LDA #0x00
 	
-loop:	
+loop:
+	PHA 
+	JSR f_printByte
+	LDA #' '
+    JSR	f_SendLcdChar
+	PLA
 	PHA
 	JSR f_playNote
-	LDA #0x00
-	
-inner_loop:
-	ADC #0x01
-	BCC inner_loop
-
+	JSR f_delay
 	PLA
-	ADC #0x01
-	CMP #0x0C
-	BNE continue
-	LDA #0x00
-continue:
-	BRA loop
 	
+	ADC #0x01
+	CMP #0x08
+	BCC loop
+
+	
+	JSR f_delay
+	
+	; Clear Display
+	LDA #0b00000001 ; 
+	JSR f_SendLcdInstruction
+	
+	
+	; silence audio
+	LDA #0x00
+	STA PORTA
+
 end:
 	BRA end
 
+f_delay:
+	LDA #0x00
+inner_loop:
+	ADC #0x01
+	BCC inner_loop
+	CLC
+	RTS
+
+
 f_playNote:
 	; A - note
-	CMP #0xC
+	CMP #0x08
 	BCC playNote_good
-	LDA 0x00
+	LDA #0x00
 playNote_good:
 	TAX
-	LDA 0x00FF, X
+	LDA 0xFF00, X
+	ORA #SOUND_ENABLE
 	PHA
 	JSR f_printByte
 	; return home
@@ -120,173 +150,7 @@ playNote_good:
 	
 	RTS
 
-f_printByte:
-	; prints a byte in hex on the display
-	; A - byte
-	; clobbers registers, TEMP 0-3
-	
-	TAY
-	; get high nybble first
-	AND #0b11110000
-	LSR A
-	LSR A
-	LSR A
-	LSR A
-	JSR f_NybbleToChar
-	STA TEMP + 1
-	; low nybble
-	TYA
-	AND #0b00001111
-	JSR f_NybbleToChar
-	STA TEMP + 2
-	
-	; add a '\0' to the string
-	LDA #0x00
-	STA TEMP + 3
-	LDA #<(TEMP+1)
-	STA 0x00
-	LDA #>(TEMP+1)
-	STA 0x01
-	JSR f_PrintString
-	RTS
-	
-	
-
-f_NybbleToChar:
-	; converts the value in A (0-15) to it's corresponding Hexidecimal digit
-	CMP #0xA
-	BCS NybbleToChar_letter
-	; number
-	ADC #0x30
-	RTS
-NybbleToChar_letter:
-	ADC #0x36
-	RTS
-
-	
-f_PrintString:
-	; 0000, 0001 - address of string
-	; string must fit within page.
-	; clobbers A, X, TEMP0
-	LDY #0
-printString_loop:
-	; stash Y on the stack
-	TYA
-	PHA
-	
-	LDA (0x00), Y ; load a pointer in the zero page plus Y.
-	BEQ printString_end
-	JSR f_SendLcdChar
-	
-	; take Y off the stack and increment
-	PLA
-	TAY
-	INY
-	BRA printString_loop
-
-printString_end:
-	PLA ; clean up the stack
-	RTS
-	
-
-
-f_SendLcdInstruction: 
-	; A - the instruction to send
-	; clobbers A, X, TEMP0
-	TAX
-	; get the high nybble (to send first)
-	AND #0xF0
-	
-	; send
-	STA PORTB
-	LDA #E
-	JSR f_SetLcdControl
-	LDA #0
-	JSR f_SetLcdControl
-
-	; get the low nybble
-	TXA
-	AND #0x0F
-	; bitshift << 4
-	ASL A
-	ASL A
-	ASL A
-	ASL A
-	
-	; send
-	STA PORTB
-	LDA #E
-	JSR f_SetLcdControl
-	LDA #0
-	JSR f_SetLcdControl
-	
-	RTS
-
-	
-f_SendLcdChar: 
-	; A - the instruction to send
-	; destroys All
-	TAX
-	; get the high nybble (to send first)
-	AND #0xF0
-	; send
-	STA PORTB
-	LDA #RS
-	JSR f_SetLcdControl
-	LDA #RS|E
-	JSR f_SetLcdControl
-	LDA #RS
-	JSR f_SetLcdControl
-		
-	; get the low nybble
-	TXA
-	AND #0x0F
-	; bitshift << 4
-	ASL A
-	ASL A
-	ASL A
-	ASL A
-	
-	; send
-	JSR f_SetLcdData
-	LDA #RS|E
-	JSR f_SetLcdControl
-	LDA #RS
-	JSR f_SetLcdControl
-	
-	RTS
-	
-f_SetLcdData:
-	; A - high nybble contains data to send, low nybble is zero.
-	; clobbers A, TEMP0
-	STA TEMP
-	
-	; grab the low nybble of PORTB
-	LDA #0b00001111
-	AND PORTB
-	
-	; now or Y and A together to merge them
-	ORA TEMP
-	
-	; A should now store what we want to have in port B!
-	STA PORTB
-	RTS
-
-f_SetLcdControl:
-	; A - low nybble contains control lines to update, high nybble is zero.
-	; clobbers A, TEMP0
-	STA TEMP
-	
-	; grab the low nybble of PORTB
-	LDA #0b11110000
-	AND PORTB
-	
-	; now or Y and A together to merge them
-	ORA TEMP
-	
-	; A should now store what we want to have in port B!
-	STA PORTB
-	RTS
+.include lib/lib.txt
 
 .org 0xfffc
 	; reset vector

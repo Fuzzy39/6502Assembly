@@ -1,0 +1,210 @@
+f_printByte:
+	; prints a byte in hex on the display
+	; A - byte
+	; clobbers registers, TEMP 0-3
+	
+	TAY
+	; get high nybble first
+	AND #0b11110000
+	LSR A
+	LSR A
+	LSR A
+	LSR A
+	JSR f_NybbleToChar
+	STA TEMP + 1
+	; low nybble
+	TYA
+	AND #0b00001111
+	JSR f_NybbleToChar
+	STA TEMP + 2
+	
+	; add a '\0' to the string
+	LDA #0x00
+	STA TEMP + 3
+	LDA #<(TEMP+1)
+	STA 0x00
+	LDA #>(TEMP+1)
+	STA 0x01
+	JSR f_PrintString
+	RTS
+	
+	
+
+f_NybbleToChar:
+	; converts the value in A (0-15) to it's corresponding Hexidecimal digit
+	CMP #0xA
+	BCS NybbleToChar_letter
+	; number
+	ADC #0x30
+	RTS
+NybbleToChar_letter:
+	ADC #0x36
+	RTS
+
+	
+f_PrintString:
+	; 0000, 0001 - address of string
+	; string must fit within page.
+	; clobbers A, X, TEMP0
+	LDY #0
+printString_loop:
+	; stash Y on the stack
+	TYA
+	PHA
+	
+	LDA (0x00), Y ; load a pointer in the zero page plus Y.
+	BEQ printString_end
+	JSR f_SendLcdChar
+	
+	; take Y off the stack and increment
+	PLA
+	TAY
+	INY
+	BRA printString_loop
+
+printString_end:
+	PLA ; clean up the stack
+	RTS
+	
+
+
+f_SendLcdInstruction: 
+	; A - the instruction to send
+	; clobbers A, X, TEMP0
+	TAX
+	JSR f_waitForLcdReady
+	TXA
+	; get the high nybble (to send first)
+	AND #0xF0
+	
+	; send
+	STA PORTB
+	LDA #E
+	JSR f_SetLcdControl
+	LDA #0
+	JSR f_SetLcdControl
+
+	; get the low nybble
+	TXA
+	AND #0x0F
+	; bitshift << 4
+	ASL A
+	ASL A
+	ASL A
+	ASL A
+	
+	; send
+	STA PORTB
+	LDA #E
+	JSR f_SetLcdControl
+	LDA #0
+	JSR f_SetLcdControl
+	
+	RTS
+
+	
+f_SendLcdChar: 
+	; A - the instruction to send
+	; destroys All
+	TAX
+	JSR f_waitForLcdReady
+	TXA
+	
+	; get the high nybble (to send first)
+	AND #0xF0
+	; send
+	STA PORTB
+	LDA #RS
+	JSR f_SetLcdControl
+	LDA #RS|E
+	JSR f_SetLcdControl
+	LDA #RS
+	JSR f_SetLcdControl
+		
+	; get the low nybble
+	TXA
+	AND #0x0F
+	; bitshift << 4
+	ASL A
+	ASL A
+	ASL A
+	ASL A
+	
+	; send
+	JSR f_SetLcdData
+	LDA #RS|E
+	JSR f_SetLcdControl
+	LDA #RS
+	JSR f_SetLcdControl
+	
+	RTS
+	
+f_SetLcdData:
+	; A - high nybble contains data to send, low nybble is zero.
+	; clobbers A, TEMP0
+	STA TEMP
+	
+	; grab the low nybble of PORTB
+	LDA #0b00001111
+	AND PORTB
+	
+	; now or Y and A together to merge them
+	ORA TEMP
+	
+	; A should now store what we want to have in port B!
+	STA PORTB
+	RTS
+
+f_SetLcdControl:
+	; A - low nybble contains control lines to update, high nybble is zero.
+	; clobbers A, TEMP0
+	STA TEMP
+	
+	; grab the low nybble of PORTB
+	LDA #0b11110000
+	AND PORTB
+	
+	; now or Y and A together to merge them
+	ORA TEMP
+	
+	; A should now store what we want to have in port B!
+	STA PORTB
+	RTS
+
+f_waitForLcdReady:
+	; set PORTB for input
+	LDA #0x0F
+	STA DDRB
+	
+waitForLcdReady_loop:
+	; destroys A.
+	
+	; read busy flag
+	LDA #RW
+	STA PORTB
+	LDA #RW|E
+	STA PORTB
+	
+	; store it
+	LDA PORTB
+	PHA 
+	
+	; finish read operation
+	LDA #RW
+	STA PORTB
+	LDA #RW|E
+	STA PORTB
+	
+	PLA
+	AND #0b10000000
+	CMP #0
+	BNE waitForLcdReady_loop
+
+	; restore port B setting
+	LDA #0xFF
+	STA DDRB
+
+	LDA #0
+	STA PORTB
+	
+	RTS 
